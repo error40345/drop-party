@@ -20,8 +20,8 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/create" component={Create} />
-      <Route path="/drop/:dropId" component={DropPage} />
-      <Route path="/drop/:dropId/claimed" component={ClaimedPage} />
+      <Route path="/drop/:dropId/:token" component={DropPage} />
+      <Route path="/drop/:dropId/:token/claimed" component={ClaimedPage} />
       <Route component={NotFound} />
     </Switch>
   );

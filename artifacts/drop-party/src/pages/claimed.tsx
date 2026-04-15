@@ -7,7 +7,7 @@ import { useReadContract } from "wagmi";
 import { DROP_PARTY_ADDRESS, DROP_PARTY_ABI, formatUsdc } from "@/lib/contracts";
 
 export function ClaimedPage() {
-  const { dropId: dropIdStr } = useParams<{ dropId: string }>();
+  const { dropId: dropIdStr, token } = useParams<{ dropId: string; token: string }>();
   const [showConfetti, setShowConfetti] = useState(true);
 
   const dropId = dropIdStr !== undefined ? BigInt(dropIdStr) : undefined;
@@ -29,11 +29,12 @@ export function ClaimedPage() {
   const dropTitle = dropData ? dropData[1] : "Drop";
 
   const shareText = `I just grabbed $${amountDisplay} USDC from "${dropTitle}" on DropParty ⚡`;
-  const shareUrl =
+  // Share URL includes the token so recipients can access the drop
+  const baseUrl =
     typeof window !== "undefined"
-      ? window.location.href.replace("/claimed", "")
+      ? `${window.location.origin}${window.location.pathname.replace(/\/claimed$/, "")}`
       : "";
-  const twitterIntent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
+  const twitterIntent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(baseUrl)}`;
 
   return (
     <Layout>
@@ -89,7 +90,7 @@ export function ClaimedPage() {
               BRAG ON X
             </Button>
           </a>
-          <Link href={`/drop/${dropIdStr}`} className="flex-1">
+          <Link href={`/drop/${dropIdStr}/${token}`} className="flex-1">
             <Button
               variant="outline"
               className="w-full h-14 font-bold font-mono text-lg border-primary/30 hover:bg-primary/10"

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { useWallet } from "@/lib/wallet";
 import { useCreateDrop } from "@workspace/api-client-react";
+import { generateDropToken, saveMyDrop } from "@/lib/drops-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -143,29 +144,37 @@ export function Create() {
 
       const dropIdStr = dropId !== undefined ? dropId.toString() : "0";
 
-      // Record to API server for the home page feed
-      createDropApi.mutate(
-        {
-          data: {
-            title,
-            totalAmount: totalAmount,
-            maxClaims: maxClaimsInt,
-            amountPerClaim: amountPerClaimDisplay,
-            contractAddress: `${DROP_PARTY_ADDRESS}:${dropIdStr}`,
-            creatorAddress: effectiveAddress ?? "",
-            txHash: createDropTxHash ?? "",
-          },
+      // Generate a cryptographically random token — this becomes the secret
+      // component of the share URL. Without it the drop cannot be accessed via UI.
+      const token = generateDropToken();
+
+      // Persist in localStorage so the creator can always recover their link
+      saveMyDrop({
+        dropId: dropIdStr,
+        token,
+        title,
+        createdAt: Date.now(),
+        txHash: createDropTxHash ?? undefined,
+      });
+
+      // Best-effort: record to API server (non-blocking, ignore failures)
+      createDropApi.mutate({
+        data: {
+          title,
+          totalAmount: totalAmount,
+          maxClaims: maxClaimsInt,
+          amountPerClaim: amountPerClaimDisplay,
+          contractAddress: `${DROP_PARTY_ADDRESS}:${dropIdStr}`,
+          creatorAddress: effectiveAddress ?? "",
+          txHash: createDropTxHash ?? "",
         },
-        {
-          onSettled: () => {
-            toast({
-              title: "Drop deployed!",
-              description: `Drop #${dropIdStr} is live on Arc Testnet.`,
-            });
-            setLocation(`/drop/${dropIdStr}`);
-          },
-        }
-      );
+      });
+
+      toast({
+        title: "Drop deployed!",
+        description: `Drop #${dropIdStr} is live. Share your private link!`,
+      });
+      setLocation(`/drop/${dropIdStr}/${token}`);
     }
   }, [isCreateDropConfirmed]);
 

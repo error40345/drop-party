@@ -2,11 +2,12 @@ import { useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { useWallet } from "@/lib/wallet";
 import { shortenAddress } from "@/lib/utils";
+import { isValidToken } from "@/lib/drops-store";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useLocation, useParams } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Zap, Share2 } from "lucide-react";
+import { Loader2, Zap, Share2, Lock } from "lucide-react";
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from "wagmi";
 import {
   DROP_PARTY_ADDRESS,
@@ -16,7 +17,7 @@ import {
 } from "@/lib/contracts";
 
 export function DropPage() {
-  const { dropId: dropIdStr } = useParams<{ dropId: string }>();
+  const { dropId: dropIdStr, token } = useParams<{ dropId: string; token: string }>();
   const { address: walletAddress, connect } = useWallet();
   const { address: wagmiAddress } = useAccount();
   const effectiveAddress = wagmiAddress ?? walletAddress;
@@ -25,7 +26,11 @@ export function DropPage() {
 
   const dropId = dropIdStr !== undefined ? BigInt(dropIdStr) : undefined;
 
-  // Read drop info from chain
+  // Gate: token must be a valid 32-char hex string.
+  // Without the exact link the drop is inaccessible through the UI.
+  const tokenOk = isValidToken(token);
+
+  // Read drop info from chain (only when token is valid)
   const {
     data: dropData,
     isLoading: isLoadingDrop,
@@ -36,7 +41,7 @@ export function DropPage() {
     functionName: "getDrop",
     args: dropId !== undefined ? [dropId] : undefined,
     query: {
-      enabled: dropId !== undefined,
+      enabled: tokenOk && dropId !== undefined,
       refetchInterval: 5000,
     },
   });
@@ -48,7 +53,7 @@ export function DropPage() {
     functionName: "hasClaimed",
     args: dropId !== undefined && effectiveAddress ? [dropId, effectiveAddress as `0x${string}`] : undefined,
     query: {
-      enabled: dropId !== undefined && !!effectiveAddress,
+      enabled: tokenOk && dropId !== undefined && !!effectiveAddress,
       refetchInterval: 5000,
     },
   });
@@ -69,7 +74,7 @@ export function DropPage() {
     if (isClaimConfirmed) {
       refetchDrop();
       refetchHasClaimed();
-      setLocation(`/drop/${dropIdStr}/claimed`);
+      setLocation(`/drop/${dropIdStr}/${token}/claimed`);
     }
   }, [isClaimConfirmed]);
 
@@ -89,9 +94,7 @@ export function DropPage() {
       connect();
       return;
     }
-
     if (dropId === undefined) return;
-
     writeClaim({
       address: DROP_PARTY_ADDRESS,
       abi: DROP_PARTY_ABI,
@@ -100,6 +103,23 @@ export function DropPage() {
       chainId: arcTestnet.id,
     });
   };
+
+  // --- Invalid / missing token ---
+  if (!tokenOk) {
+    return (
+      <Layout>
+        <div className="min-h-[60vh] flex flex-col items-center justify-center text-center gap-6 max-w-md mx-auto">
+          <Lock className="w-16 h-16 text-primary/40" />
+          <h1 className="text-3xl font-black font-mono uppercase tracking-tight text-foreground">
+            Link Required
+          </h1>
+          <p className="font-mono text-muted-foreground text-sm">
+            This drop is private. You need the creator's share link to claim.
+          </p>
+        </div>
+      </Layout>
+    );
+  }
 
   if (isLoadingDrop) {
     return (
@@ -142,8 +162,9 @@ export function DropPage() {
   const percent = maxClaims > 0n ? Math.min(100, Math.round(Number((claimedCount * 100n) / maxClaims))) : 0;
   const isExpired = expiresAt > 0n && BigInt(Math.floor(Date.now() / 1000)) > expiresAt;
 
-  const shareText = `just dropped $${totalDisplay} USDC on DropParty — first come first serve 👇`;
+  // Share URL preserves the token so recipients can also access the drop
   const shareUrl = typeof window !== "undefined" ? window.location.href : "";
+  const shareText = `just dropped $${totalDisplay} USDC on DropParty — first come first serve 👇`;
   const twitterIntent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
 
   const isClaiming = isClaimPending || isClaimConfirming;

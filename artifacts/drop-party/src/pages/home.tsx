@@ -1,19 +1,45 @@
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Link } from "wouter";
-import { useGetDropsSummary, useListDrops, useGetRecentActivity } from "@workspace/api-client-react";
+import { useGetDropsSummary } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { shortenAddress } from "@/lib/utils";
-import { formatDistanceToNow } from "date-fns";
-import { Zap, Activity, Clock } from "lucide-react";
+import { loadMyDrops, StoredDrop } from "@/lib/drops-store";
+import { Zap, ExternalLink, Copy, Check } from "lucide-react";
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="inline-flex items-center gap-1 text-xs font-mono text-primary/60 hover:text-primary transition-colors ml-2"
+      title="Copy share link"
+    >
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? "Copied!" : "Copy"}
+    </button>
+  );
+}
 
 export function Home() {
   const { data: summary } = useGetDropsSummary({ query: { refetchInterval: 5000 } });
-  const { data: drops } = useListDrops({ query: { refetchInterval: 5000 } });
-  const { data: activity } = useGetRecentActivity({ query: { refetchInterval: 3000 } });
+  const [myDrops, setMyDrops] = useState<StoredDrop[]>([]);
 
-  const activeDrops = drops?.filter(d => d.isActive && d.claimedCount < d.maxClaims) || [];
+  useEffect(() => {
+    setMyDrops(loadMyDrops());
+  }, []);
+
+  const getShareLink = (drop: StoredDrop) =>
+    `${window.location.origin}${import.meta.env.BASE_URL?.replace(/\/$/, "")}/drop/${drop.dropId}/${drop.token}`;
 
   return (
     <Layout>
@@ -67,87 +93,51 @@ export function Home() {
           </Card>
         </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Active Drops */}
-          <section className="lg:col-span-2 flex flex-col gap-6">
-            <div className="flex items-center gap-2 border-b border-primary/20 pb-2">
-              <Zap className="text-primary h-5 w-5" />
-              <h2 className="text-2xl font-bold font-mono uppercase tracking-tight">Active Drops</h2>
-            </div>
-            
-            <div className="flex flex-col gap-4">
-              {activeDrops.length === 0 ? (
-                <div className="p-8 text-center border border-dashed border-primary/20 rounded bg-black/50">
-                  <p className="text-muted-foreground font-mono">No active drops right now.</p>
-                </div>
-              ) : (
-                activeDrops.map(drop => {
-                  const percent = Math.min(100, Math.round((drop.claimedCount / drop.maxClaims) * 100));
-                  return (
-                    <Link key={drop.id} href={`/drop/${drop.contractAddress}`}>
-                      <Card className="group border-primary/30 bg-black hover:border-primary transition-colors cursor-pointer relative overflow-hidden">
-                        <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <CardContent className="p-5 flex flex-col gap-4 relative z-10">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <h3 className="text-xl font-bold font-mono uppercase">{drop.title}</h3>
-                              <p className="text-sm text-muted-foreground font-mono mt-1">By {shortenAddress(drop.creatorAddress)}</p>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xl font-black font-mono text-primary">${drop.amountPerClaim} <span className="text-sm text-muted-foreground">EACH</span></div>
-                              <div className="text-sm font-mono text-muted-foreground mt-1">${drop.totalAmount} TOTAL</div>
-                            </div>
-                          </div>
-                          
-                          <div className="flex flex-col gap-2">
-                            <div className="flex justify-between text-xs font-mono">
-                              <span className="text-primary">{drop.claimedCount} CLAIMED</span>
-                              <span>{drop.maxClaims} TOTAL</span>
-                            </div>
-                            <Progress value={percent} className="h-2 bg-primary/20" indicatorClassName="bg-primary shadow-[0_0_10px_rgba(20,255,100,0.5)]" />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </Link>
-                  );
-                })
-              )}
-            </div>
-          </section>
+        {/* My Drops (creator's private dashboard) */}
+        <section className="flex flex-col gap-6">
+          <div className="flex items-center gap-2 border-b border-primary/20 pb-2">
+            <Zap className="text-primary h-5 w-5" />
+            <h2 className="text-2xl font-bold font-mono uppercase tracking-tight">My Drops</h2>
+          </div>
 
-          {/* Live Feed */}
-          <section className="flex flex-col gap-6">
-            <div className="flex items-center justify-between border-b border-primary/20 pb-2">
-              <div className="flex items-center gap-2">
-                <Activity className="text-primary h-5 w-5 animate-pulse" />
-                <h2 className="text-2xl font-bold font-mono uppercase tracking-tight">Live Feed</h2>
-              </div>
+          {myDrops.length === 0 ? (
+            <div className="p-10 text-center border border-dashed border-primary/20 rounded bg-black/50 flex flex-col items-center gap-4">
+              <p className="text-muted-foreground font-mono">You haven't created any drops on this device yet.</p>
+              <Link href="/create">
+                <Button className="font-mono electric-glow bg-primary text-black hover:bg-primary/90 font-bold uppercase">
+                  <Zap className="w-4 h-4 mr-2" />
+                  Create Your First Drop
+                </Button>
+              </Link>
             </div>
-            
-            <div className="flex flex-col gap-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-              {!activity || activity.length === 0 ? (
-                <div className="p-4 text-center border border-dashed border-primary/20 rounded bg-black/50">
-                  <p className="text-muted-foreground font-mono text-sm">Quiet... too quiet.</p>
-                </div>
-              ) : (
-                activity.map((item, i) => (
-                  <div key={`${item.contractAddress}-${item.claimerAddress}-${i}`} className="animate-slide-down flex flex-col gap-1 p-3 rounded bg-black border border-primary/10 hover:border-primary/30 transition-colors">
-                    <div className="flex justify-between items-center">
-                      <span className="font-mono font-bold text-sm text-primary">{shortenAddress(item.claimerAddress)}</span>
-                      <span className="font-mono text-xs text-muted-foreground flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {formatDistanceToNow(new Date(item.claimedAt), { addSuffix: true })}
-                      </span>
-                    </div>
-                    <div className="font-mono text-sm">
-                      grabbed <span className="font-bold text-foreground">${item.amount}</span> in <Link href={`/drop/${item.contractAddress}`} className="text-primary hover:underline">{item.dropTitle}</Link>
-                    </div>
-                  </div>
-                ))
-              )}
+          ) : (
+            <div className="flex flex-col gap-4">
+              {myDrops.map(drop => (
+                <Link key={drop.dropId} href={`/drop/${drop.dropId}/${drop.token}`}>
+                  <Card className="group border-primary/30 bg-black hover:border-primary transition-colors cursor-pointer relative overflow-hidden">
+                    <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <CardContent className="p-5 flex flex-col gap-3 relative z-10">
+                      <div className="flex justify-between items-start">
+                        <div className="flex flex-col gap-0.5">
+                          <h3 className="text-xl font-bold font-mono uppercase">{drop.title}</h3>
+                          <span className="text-xs font-mono text-muted-foreground">Drop #{drop.dropId}</span>
+                        </div>
+                        <ExternalLink className="w-4 h-4 text-primary/40 group-hover:text-primary transition-colors mt-1" />
+                      </div>
+                      {/* Private share link */}
+                      <div className="flex items-center gap-2 p-2 rounded bg-primary/5 border border-primary/20">
+                        <span className="font-mono text-xs text-muted-foreground truncate flex-1">
+                          {getShareLink(drop)}
+                        </span>
+                        <CopyButton text={getShareLink(drop)} />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
             </div>
-          </section>
-        </div>
+          )}
+        </section>
       </div>
     </Layout>
   );
