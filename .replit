@@ -58,4 +58,3 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-DEPLOYER_PRIVATE_KEY = "0x31bd05297d324bb467094dfa1996d8ffef2bb430b35d0b7bd4cc8ca7ca1ef6ba"
