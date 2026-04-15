@@ -1,5 +1,5 @@
 {
-  "buildCommand": "pnpm --filter @workspace/drop-party run build && cp artifacts/drop-party/dist/public/index.html artifacts/drop-party/dist/public/404.html",
+  "buildCommand": "pnpm --filter @workspace/drop-party run build",
   "outputDirectory": "artifacts/drop-party/dist/public",
   "installCommand": "pnpm install",
   "framework": null
