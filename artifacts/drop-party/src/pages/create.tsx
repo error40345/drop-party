@@ -56,6 +56,17 @@ export function Create() {
     amountPerClaim !== "0.000000" ? parseUsdc(amountPerClaim) : 0n;
   const maxClaimsInt = Number(maxClaims) || 0;
 
+  // Read USDC balance
+  const { data: usdcBalance } = useReadContract({
+    address: USDC_ADDRESS,
+    abi: USDC_ABI,
+    functionName: "balanceOf",
+    args: effectiveAddress ? [effectiveAddress as `0x${string}`] : undefined,
+    query: { enabled: !!effectiveAddress, refetchInterval: 10000 },
+  });
+
+  const balanceDisplay = usdcBalance !== undefined ? formatUsdc(usdcBalance) : null;
+
   // Read current USDC allowance
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: USDC_ADDRESS,
@@ -215,6 +226,11 @@ export function Create() {
       return;
     }
 
+    if (usdcBalance !== undefined && totalAmountBigInt > usdcBalance) {
+      toast({ title: "Insufficient USDC", description: "You don't have enough USDC in your wallet.", variant: "destructive" });
+      return;
+    }
+
     if (hasEnoughAllowance) {
       // Skip approval step
       submitCreateDrop();
@@ -300,24 +316,41 @@ export function Create() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <Label htmlFor="total" className="font-mono text-xs uppercase text-muted-foreground">
-                      Total Pool (USDC)
-                    </Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="total" className="font-mono text-xs uppercase text-muted-foreground">
+                        Total Pool (USDC)
+                      </Label>
+                      {balanceDisplay !== null && (
+                        <button
+                          type="button"
+                          onClick={() => !isLoading && setTotalAmount(balanceDisplay)}
+                          className="font-mono text-xs text-primary/70 hover:text-primary transition-colors flex items-center gap-1 disabled:opacity-40"
+                          disabled={isLoading}
+                        >
+                          BAL: <span className="font-bold">${balanceDisplay}</span>
+                          <span className="ml-1 px-1 py-0.5 rounded border border-primary/30 text-[10px] hover:bg-primary/10">MAX</span>
+                        </button>
+                      )}
+                    </div>
                     <div className="relative">
-                      <span className="absolute left-4 top-3 font-mono text-primary font-bold">$</span>
+                      <span className="absolute left-4 top-3 font-mono text-primary font-bold z-10">$</span>
                       <Input
                         id="total"
-                        type="number"
-                        min="0.000001"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="100.00"
                         value={totalAmount}
-                        onChange={(e) => setTotalAmount(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (/^\d*\.?\d*$/.test(val)) setTotalAmount(val);
+                        }}
                         className="font-mono text-lg pl-8 bg-background border-primary/30 focus-visible:ring-primary h-12"
-                        required
                         disabled={isLoading}
                       />
                     </div>
+                    {usdcBalance !== undefined && totalAmountBigInt > usdcBalance && (
+                      <p className="text-xs font-mono text-destructive">Insufficient USDC balance</p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -326,15 +359,15 @@ export function Create() {
                     </Label>
                     <Input
                       id="claims"
-                      type="number"
-                      min="1"
-                      max="10000"
-                      step="1"
+                      type="text"
+                      inputMode="numeric"
                       placeholder="10"
                       value={maxClaims}
-                      onChange={(e) => setMaxClaims(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^\d*$/.test(val)) setMaxClaims(val);
+                      }}
                       className="font-mono text-lg bg-background border-primary/30 focus-visible:ring-primary h-12"
-                      required
                       disabled={isLoading}
                     />
                   </div>
