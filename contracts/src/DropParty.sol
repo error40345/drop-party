@@ -7,17 +7,22 @@ pragma solidity ^0.8.20;
  *
  * Flow:
  *   1. Creator calls approve(dropPartyAddress, totalAmount) on USDC
- *   2. Creator calls createDrop() → USDC pulled in, Drop stored, DropCreated event emitted
- *   3. Anyone calls claim(dropId) → receives amountPerClaim USDC, Claimed event emitted
- *   4. After expiry, creator calls refundRemaining(dropId) → unspent USDC returned
+ *   2. Creator calls createDrop() → USDC pulled in atomically, Drop stored, DropCreated emitted
+ *   3. Anyone with the share link calls claim(dropId) → receives amountPerClaim USDC
+ *   4. Creator can cancel any time to recover remaining USDC
+ *   5. After expiry, anyone can trigger refundExpired() → unspent USDC returned to creator
  *
- * Design choices:
- *   - One contract holds multiple drops (identified by dropId uint256)
- *   - Each drop is independent: separate USDC pool, separate claim tracking
- *   - One address can only claim once per drop (anti-bot)
- *   - Creator can cancel their own active drop and recover remaining USDC at any time
- *   - Drops auto-deactivate when fully claimed
- *   - All USDC amounts use 6 decimals (Arc Testnet USDC ERC-20 standard)
+ * Security model:
+ *   - Checks-Effects-Interactions (CEI) pattern enforced in ALL write functions:
+ *     state is updated BEFORE external token transfers to prevent reentrancy.
+ *   - Each drop's funds are accounted for via (maxClaims - claimedCount) * amountPerClaim.
+ *     No drop can access another drop's USDC because transfers are always bounded by
+ *     the drop's own accounting, not the contract's total balance.
+ *   - One address can only claim once per drop (mapping prevents double-claim).
+ *   - Creator is the sole beneficiary of all refunds; refundExpired() can be called by
+ *     anyone as a gas bounty, but funds always go to d.creator.
+ *   - Solidity 0.8.20 reverts on overflow/underflow automatically. The only unchecked
+ *     block is the nextDropId increment, which would require 2^256 transactions to wrap.
  */
 
 interface IERC20 {
@@ -28,6 +33,17 @@ interface IERC20 {
 }
 
 contract DropParty {
+    // ─── Constants ────────────────────────────────────────────────────────────
+
+    uint256 public constant MAX_CLAIMS      = 10_000;
+    uint256 public constant MAX_TITLE_BYTES = 200;
+    // 1 billion USDC (6 dec) per claim — effectively unreachable but prevents
+    // any uint256 multiplication reaching values that could cause logical issues
+    // even though Solidity 0.8 would revert on actual overflow.
+    uint256 public constant MAX_AMOUNT_PER_CLAIM = 1_000_000_000 * 1e6;
+    // 10 years in seconds — prevents nonsensical far-future expiry
+    uint256 public constant MAX_EXPIRY_OFFSET = 10 * 365 days;
+
     // ─── State ───────────────────────────────────────────────────────────────
 
     IERC20 public immutable usdc;
@@ -48,6 +64,7 @@ contract DropParty {
     mapping(uint256 => Drop) private _drops;
 
     // dropId → claimer → claimed
+    // Two-level mapping ensures each (drop, address) pair is independent.
     mapping(uint256 => mapping(address => bool)) private _claimed;
 
     // ─── Events ──────────────────────────────────────────────────────────────
@@ -87,16 +104,17 @@ contract DropParty {
         usdc = IERC20(_usdc);
     }
 
-    // ─── Write functions ──────────────────────────────────────────────────────
+    // ─── Write functions ─────────────────────────────────────────────────────
 
     /**
      * @notice Create a new USDC drop.
      * @dev Caller must have approved this contract for at least amountPerClaim * maxClaims.
-     * @param title        Human-readable name shown on the UI
+     *      USDC is pulled atomically in this call — no USDC is held on behalf of other drops.
+     * @param title          Human-readable name (max 200 bytes)
      * @param amountPerClaim USDC amount each claimer receives (6 decimals, e.g. 2000000 = $2)
-     * @param maxClaims    How many unique wallets can claim
-     * @param expiresAt    Unix timestamp when unclaimed USDC can be refunded (0 = no expiry)
-     * @return dropId      The ID of the newly created drop
+     * @param maxClaims      How many unique wallets can claim (max 10,000)
+     * @param expiresAt      Unix timestamp when unclaimed USDC can be refunded (0 = no expiry)
+     * @return dropId        The ID of the newly created drop
      */
     function createDrop(
         string calldata title,
@@ -104,15 +122,20 @@ contract DropParty {
         uint256 maxClaims,
         uint256 expiresAt
     ) external returns (uint256 dropId) {
-        require(bytes(title).length > 0,  "Title required");
-        require(amountPerClaim > 0,        "Amount must be > 0");
-        require(maxClaims > 0,             "Must allow at least 1 claim");
-        require(maxClaims <= 10000,        "Too many claims (max 10000)");
+        // ── Input validation ──────────────────────────────────────────────────
+        require(bytes(title).length > 0,               "Title required");
+        require(bytes(title).length <= MAX_TITLE_BYTES, "Title too long (max 200 bytes)");
+        require(amountPerClaim > 0,                     "Amount must be > 0");
+        require(amountPerClaim <= MAX_AMOUNT_PER_CLAIM, "Amount per claim too large");
+        require(maxClaims > 0,                          "Must allow at least 1 claim");
+        require(maxClaims <= MAX_CLAIMS,                "Too many claims (max 10000)");
         require(
-            expiresAt == 0 || expiresAt > block.timestamp,
-            "Expiry must be in the future"
+            expiresAt == 0 ||
+            (expiresAt > block.timestamp && expiresAt <= block.timestamp + MAX_EXPIRY_OFFSET),
+            "Expiry must be in the future and within 10 years"
         );
 
+        // ── Fund transfer (safe: Solidity 0.8 catches overflow) ──────────────
         uint256 totalAmount = amountPerClaim * maxClaims;
 
         require(
@@ -120,21 +143,24 @@ contract DropParty {
             "Insufficient USDC allowance - call approve() first"
         );
 
+        // EFFECT: assign dropId and increment counter before external call
+        dropId = nextDropId;
+        unchecked { nextDropId++; } // uint256 counter; wrap requires 2^256 txs
+
+        // EFFECT: write drop state before external call
+        _drops[dropId] = Drop({
+            creator:        msg.sender,
+            title:          title,
+            amountPerClaim: amountPerClaim,
+            maxClaims:      maxClaims,
+            claimedCount:   0,
+            active:         true,
+            expiresAt:      expiresAt
+        });
+
+        // INTERACTION: pull USDC from creator after all state is written
         bool ok = usdc.transferFrom(msg.sender, address(this), totalAmount);
         require(ok, "USDC transferFrom failed");
-
-        dropId = nextDropId;
-        unchecked { nextDropId++; }
-
-        _drops[dropId] = Drop({
-            creator:       msg.sender,
-            title:         title,
-            amountPerClaim: amountPerClaim,
-            maxClaims:     maxClaims,
-            claimedCount:  0,
-            active:        true,
-            expiresAt:     expiresAt
-        });
 
         emit DropCreated(
             dropId,
@@ -149,11 +175,13 @@ contract DropParty {
 
     /**
      * @notice Claim USDC from an active drop. One claim per wallet per drop.
+     * @dev CEI pattern: all state changes happen before the USDC transfer.
      * @param dropId The drop to claim from
      */
     function claim(uint256 dropId) external {
         Drop storage d = _drops[dropId];
 
+        // ── Checks ────────────────────────────────────────────────────────────
         require(d.active,                         "Drop is not active");
         require(d.claimedCount < d.maxClaims,     "Drop is fully claimed");
         require(!_claimed[dropId][msg.sender],    "Already claimed this drop");
@@ -162,14 +190,16 @@ contract DropParty {
             "Drop has expired"
         );
 
-        _claimed[dropId][msg.sender] = true;
-        d.claimedCount++;
+        // ── Effects (ALL state changes before any external call) ──────────────
+        _claimed[dropId][msg.sender] = true; // mark claimed — prevents double-claim
+        d.claimedCount++;                    // track count — bounds subsequent claims
 
         // Auto-deactivate when last slot is taken
         if (d.claimedCount == d.maxClaims) {
             d.active = false;
         }
 
+        // ── Interaction ───────────────────────────────────────────────────────
         bool ok = usdc.transfer(msg.sender, d.amountPerClaim);
         require(ok, "USDC transfer failed");
 
@@ -178,18 +208,22 @@ contract DropParty {
 
     /**
      * @notice Creator cancels their drop and recovers all remaining USDC.
-     * @dev Only callable by the original creator. Closes the drop immediately.
+     * @dev CEI pattern: drop is deactivated before any transfer.
+     *      Only the creator can call this. Remaining = unclaimed slots × amountPerClaim.
      * @param dropId The drop to cancel
      */
     function cancelDrop(uint256 dropId) external {
         Drop storage d = _drops[dropId];
 
+        // ── Checks ────────────────────────────────────────────────────────────
         require(msg.sender == d.creator, "Not the creator");
         require(d.active,                "Drop already closed");
 
+        // ── Effects ───────────────────────────────────────────────────────────
         uint256 remaining = (d.maxClaims - d.claimedCount) * d.amountPerClaim;
-        d.active = false;
+        d.active = false; // close before transfer — prevents reentrant cancel
 
+        // ── Interaction ───────────────────────────────────────────────────────
         if (remaining > 0) {
             bool ok = usdc.transfer(d.creator, remaining);
             require(ok, "Refund transfer failed");
@@ -200,22 +234,27 @@ contract DropParty {
 
     /**
      * @notice Refund remaining USDC after a drop has expired.
-     * @dev Can be called by anyone after expiry (gas incentive for creator).
+     * @dev Can be called by ANYONE after expiry — creator always receives the refund.
+     *      CEI pattern: drop is deactivated before any transfer.
      * @param dropId The drop to refund
      */
     function refundExpired(uint256 dropId) external {
         Drop storage d = _drops[dropId];
 
-        require(d.active,         "Drop already closed");
-        require(d.expiresAt > 0,  "Drop has no expiry - use cancelDrop");
+        // ── Checks ────────────────────────────────────────────────────────────
+        require(d.active,        "Drop already closed");
+        require(d.expiresAt > 0, "Drop has no expiry - use cancelDrop");
         require(
             block.timestamp > d.expiresAt,
             "Drop has not expired yet"
         );
 
+        // ── Effects ───────────────────────────────────────────────────────────
         uint256 remaining = (d.maxClaims - d.claimedCount) * d.amountPerClaim;
-        d.active = false;
+        d.active = false; // close before transfer — prevents reentrant refund
 
+        // ── Interaction ───────────────────────────────────────────────────────
+        // NOTE: refund ALWAYS goes to d.creator regardless of who calls this function
         if (remaining > 0) {
             bool ok = usdc.transfer(d.creator, remaining);
             require(ok, "Refund transfer failed");
@@ -261,8 +300,6 @@ contract DropParty {
 
     /**
      * @notice Check whether a drop is currently claimable.
-     * @return claimable  True if active, not expired, and has remaining slots
-     * @return reason     Human-readable reason if not claimable
      */
     function isClaimable(uint256 dropId) external view returns (bool claimable, string memory reason) {
         Drop storage d = _drops[dropId];
@@ -280,7 +317,8 @@ contract DropParty {
     }
 
     /**
-     * @notice How many USDC (6 dec) the contract currently holds for a drop.
+     * @notice Accounting balance for a drop: unclaimed slots × amountPerClaim.
+     *         This exactly matches what the contract owes to this drop's claimers.
      */
     function dropBalance(uint256 dropId) external view returns (uint256) {
         Drop storage d = _drops[dropId];

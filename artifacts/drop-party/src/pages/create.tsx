@@ -233,8 +233,18 @@ export function Create() {
       return;
     }
 
+    if (new TextEncoder().encode(title).length > 200) {
+      toast({ title: "Title too long", description: "Max 200 characters.", variant: "destructive" });
+      return;
+    }
+
     if (maxClaimsInt > 10000) {
       toast({ title: "Too many claims", description: "Max 10,000 winners.", variant: "destructive" });
+      return;
+    }
+
+    if (amountPerClaimBigInt > 1_000_000_000n * 1_000_000n) {
+      toast({ title: "Amount too large", description: "Amount per claim exceeds the limit.", variant: "destructive" });
       return;
     }
 
