@@ -1,7 +1,9 @@
 {
-  "buildCommand": "pnpm --filter @workspace/api-client-react build && pnpm --filter @workspace/drop-party build",
+  "buildCommand": "pnpm --filter @workspace/drop-party run build",
   "outputDirectory": "artifacts/drop-party/dist/public",
   "installCommand": "pnpm install",
   "framework": null,
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
