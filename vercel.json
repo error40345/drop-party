@@ -1,10 +1,6 @@
 {
-  "buildCommand": "pnpm --filter @workspace/drop-party run build",
+  "buildCommand": "pnpm --filter @workspace/drop-party run build && cp artifacts/drop-party/dist/public/index.html artifacts/drop-party/dist/public/404.html",
   "outputDirectory": "artifacts/drop-party/dist/public",
   "installCommand": "pnpm install",
-  "framework": null,
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
-  ]
+  "framework": null
 }
