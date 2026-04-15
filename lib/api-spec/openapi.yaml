@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: DropParty API - Viral onchain USDC giveaway platform on Arc Network
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: drops
+    description: Drop party operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,160 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /drops:
+    get:
+      operationId: listDrops
+      tags: [drops]
+      summary: List all drops
+      description: Returns a list of all drops with their current status
+      responses:
+        "200":
+          description: List of drops
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Drop"
+    post:
+      operationId: createDrop
+      tags: [drops]
+      summary: Register a new drop
+      description: Register a newly deployed drop contract with the platform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDropBody"
+      responses:
+        "201":
+          description: Drop created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /drops/{contractAddress}:
+    get:
+      operationId: getDrop
+      tags: [drops]
+      summary: Get a drop by contract address
+      parameters:
+        - name: contractAddress
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Drop details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Drop"
+        "404":
+          description: Drop not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /drops/{contractAddress}/claims:
+    get:
+      operationId: listDropClaims
+      tags: [drops]
+      summary: List claims for a drop
+      description: Returns the claim history for a specific drop
+      parameters:
+        - name: contractAddress
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of claims
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Claim"
+    post:
+      operationId: recordClaim
+      tags: [drops]
+      summary: Record a new claim
+      description: Record that a wallet claimed from a drop
+      parameters:
+        - name: contractAddress
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordClaimBody"
+      responses:
+        "201":
+          description: Claim recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Drop not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /drops/stats/recent:
+    get:
+      operationId: getRecentActivity
+      tags: [drops]
+      summary: Get recent activity across all drops
+      description: Returns recent claims across all drops for the live activity feed
+      responses:
+        "200":
+          description: Recent activity feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
+  /drops/stats/summary:
+    get:
+      operationId: getDropsSummary
+      tags: [drops]
+      summary: Get global drops summary stats
+      description: Returns aggregate stats - total USDC dropped, total claims, active drops count
+      responses:
+        "200":
+          description: Global stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DropsSummary"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +190,158 @@ components:
       required:
         - status
 
+    Drop:
+      type: object
+      properties:
+        id:
+          type: integer
+        contractAddress:
+          type: string
+        creatorAddress:
+          type: string
+        title:
+          type: string
+        totalAmount:
+          type: string
+          description: Total USDC amount in the drop (as string to handle large numbers)
+        amountPerClaim:
+          type: string
+          description: Amount each claimer receives in USDC
+        maxClaims:
+          type: integer
+        claimedCount:
+          type: integer
+        isActive:
+          type: boolean
+        expiresAt:
+          type: ["string", "null"]
+          description: ISO 8601 timestamp when the drop expires
+        createdAt:
+          type: string
+          description: ISO 8601 timestamp
+        txHash:
+          type: ["string", "null"]
+          description: Transaction hash of the drop creation
+      required:
+        - id
+        - contractAddress
+        - creatorAddress
+        - title
+        - totalAmount
+        - amountPerClaim
+        - maxClaims
+        - claimedCount
+        - isActive
+        - expiresAt
+        - createdAt
+        - txHash
+
+    CreateDropBody:
+      type: object
+      properties:
+        contractAddress:
+          type: string
+        creatorAddress:
+          type: string
+        title:
+          type: string
+        totalAmount:
+          type: string
+        amountPerClaim:
+          type: string
+        maxClaims:
+          type: integer
+        expiresAt:
+          type: ["string", "null"]
+        txHash:
+          type: ["string", "null"]
+      required:
+        - contractAddress
+        - creatorAddress
+        - title
+        - totalAmount
+        - amountPerClaim
+        - maxClaims
+
+    Claim:
+      type: object
+      properties:
+        id:
+          type: integer
+        dropId:
+          type: integer
+        claimerAddress:
+          type: string
+        amount:
+          type: string
+        txHash:
+          type: ["string", "null"]
+        claimedAt:
+          type: string
+          description: ISO 8601 timestamp
+      required:
+        - id
+        - dropId
+        - claimerAddress
+        - amount
+        - txHash
+        - claimedAt
+
+    RecordClaimBody:
+      type: object
+      properties:
+        claimerAddress:
+          type: string
+        amount:
+          type: string
+        txHash:
+          type: ["string", "null"]
+      required:
+        - claimerAddress
+        - amount
+
+    ActivityItem:
+      type: object
+      properties:
+        claimerAddress:
+          type: string
+        amount:
+          type: string
+        dropTitle:
+          type: string
+        contractAddress:
+          type: string
+        claimedAt:
+          type: string
+      required:
+        - claimerAddress
+        - amount
+        - dropTitle
+        - contractAddress
+        - claimedAt
+
+    DropsSummary:
+      type: object
+      properties:
+        totalDropped:
+          type: string
+          description: Total USDC ever dropped
+        totalClaims:
+          type: integer
+        activeDropsCount:
+          type: integer
+        totalDropsCount:
+          type: integer
+      required:
+        - totalDropped
+        - totalClaims
+        - activeDropsCount
+        - totalDropsCount
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

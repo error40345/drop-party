@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "DropParty"
+version = "1.0.0"
+id = "artifacts/drop-party"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22153
+
+[services.development]
+run = "pnpm --filter @workspace/drop-party run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/drop-party", "run", "build" ]
+publicDir = "artifacts/drop-party/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22153"
+BASE_PATH = "/"
