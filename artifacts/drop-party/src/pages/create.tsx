@@ -40,21 +40,24 @@ export function Create() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
-  const amountPerClaim =
-    totalAmount && maxClaims && Number(maxClaims) > 0
-      ? (Number(totalAmount) / Number(maxClaims)).toFixed(6)
-      : "0.000000";
+  const maxClaimsInt = Number(maxClaims) || 0;
 
-  const amountPerClaimDisplay =
-    totalAmount && maxClaims && Number(maxClaims) > 0
-      ? (Number(totalAmount) / Number(maxClaims)).toFixed(2)
-      : "0.00";
-
+  // Use bigint floor division to avoid floating-point rounding issues.
+  // toFixed(6) can round UP, making amountPerClaim * maxClaims exceed the approved total.
   const totalAmountBigInt =
     totalAmount && Number(totalAmount) > 0 ? parseUsdc(totalAmount) : 0n;
+
+  // Floor division: exact amount each winner gets (bigint, no rounding up)
   const amountPerClaimBigInt =
-    amountPerClaim !== "0.000000" ? parseUsdc(amountPerClaim) : 0n;
-  const maxClaimsInt = Number(maxClaims) || 0;
+    maxClaimsInt > 0 && totalAmountBigInt > 0n
+      ? totalAmountBigInt / BigInt(maxClaimsInt)
+      : 0n;
+
+  // Actual total the contract will pull = amountPerClaim * maxClaims (may be slightly less than input)
+  const actualTotalBigInt = amountPerClaimBigInt * BigInt(maxClaimsInt || 1);
+
+  // Human-readable display values
+  const amountPerClaimDisplay = formatUsdc(amountPerClaimBigInt);
 
   // Read USDC balance
   const { data: usdcBalance } = useReadContract({
@@ -76,7 +79,7 @@ export function Create() {
     query: { enabled: !!effectiveAddress },
   });
 
-  const hasEnoughAllowance = allowance !== undefined && allowance >= totalAmountBigInt && totalAmountBigInt > 0n;
+  const hasEnoughAllowance = allowance !== undefined && allowance >= actualTotalBigInt && actualTotalBigInt > 0n;
 
   // Approve USDC
   const {
@@ -226,7 +229,7 @@ export function Create() {
       return;
     }
 
-    if (usdcBalance !== undefined && totalAmountBigInt > usdcBalance) {
+    if (usdcBalance !== undefined && actualTotalBigInt > usdcBalance) {
       toast({ title: "Insufficient USDC", description: "You don't have enough USDC in your wallet.", variant: "destructive" });
       return;
     }
@@ -235,13 +238,14 @@ export function Create() {
       // Skip approval step
       submitCreateDrop();
     } else {
-      // Step 1: Approve USDC
+      // Step 1: Approve USDC — use actualTotalBigInt (amountPerClaim * maxClaims) so
+      // the approval exactly matches what the contract will transferFrom.
       setStep("approving");
       writeApprove({
         address: USDC_ADDRESS,
         abi: USDC_ABI,
         functionName: "approve",
-        args: [DROP_PARTY_ADDRESS, totalAmountBigInt],
+        args: [DROP_PARTY_ADDRESS, actualTotalBigInt],
         chainId: arcTestnet.id,
       });
     }
@@ -348,7 +352,7 @@ export function Create() {
                         disabled={isLoading}
                       />
                     </div>
-                    {usdcBalance !== undefined && totalAmountBigInt > usdcBalance && (
+                    {usdcBalance !== undefined && actualTotalBigInt > 0n && actualTotalBigInt > usdcBalance && (
                       <p className="text-xs font-mono text-destructive">Insufficient USDC balance</p>
                     )}
                   </div>
