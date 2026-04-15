@@ -1,3 +1,27 @@
 <svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="180" height="180" rx="36" fill="#FF3C00"/>
+  <!-- Dark rounded background -->
+  <rect width="180" height="180" rx="36" fill="#0d0d0d"/>
+
+  <!-- Water drop shape in neon green -->
+  <path
+    d="M90 22
+       C90 22, 148 68, 148 108
+       A58 58 0 0 1 32 108
+       C32 68, 90 22, 90 22 Z"
+    fill="#21d160"
+  />
+
+  <!-- Highlight gloss on drop (top-left inner shine) -->
+  <ellipse cx="72" cy="76" rx="11" ry="18" fill="white" fill-opacity="0.18" transform="rotate(-20 72 76)"/>
+
+  <!-- Dollar sign cut-out in dark -->
+  <text
+    x="90"
+    y="128"
+    text-anchor="middle"
+    font-family="Arial Black, Arial, sans-serif"
+    font-weight="900"
+    font-size="62"
+    fill="#0d0d0d"
+  >$</text>
 </svg>
