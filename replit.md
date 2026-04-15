@@ -44,6 +44,30 @@ Viral onchain USDC giveaway platform built on Arc Network (Chain ID: 5042002, Ar
 - **Database**: PostgreSQL via Drizzle ORM
   - Tables: `drops`, `claims` (see `lib/db/src/schema/`)
 
+### Unique Share Links & Security Model
+
+- When a drop is created, a **128-bit cryptographically random token** is generated in the browser using `crypto.getRandomValues`
+- The token is embedded in the share URL: `/drop/:dropId/:token` (e.g. `/drop/42/a3f9c8...`)
+- The token is **never stored on-chain** — it lives only in the creator's `localStorage` and in the URL they share
+- The drop page requires a valid 32-char hex token in the URL to render; without it, users see a "Link Required" lock screen
+- **Security level**: The token has 2^128 possible values — impossible to guess by brute force
+- **Important caveat**: The smart contract itself does not enforce the token. A technically sophisticated person *could* call the contract directly, bypassing the UI gate. For a testnet giveaway app this is an acceptable trade-off. For production, token enforcement would need to move on-chain (e.g. a Merkle proof or signature scheme).
+
+### Vercel Deployment
+
+#### Frontend (Vercel Project #1)
+The `vercel.json` at the repo root configures this automatically:
+- **Build command**: `pnpm --filter @workspace/api-client-react build && pnpm --filter @workspace/drop-party build`
+- **Output directory**: `artifacts/drop-party/dist/public`
+- **SPA routing**: all routes rewire to `/index.html`
+- **Env var to set on Vercel**: `VITE_API_URL=https://your-api.vercel.app`
+
+#### API (Vercel Project #2 — deploy from `artifacts/api-server/`)
+- Uses `api/index.ts` as the Vercel serverless entry point
+- `vercel.json` in `artifacts/api-server/` handles routing and build
+- **Env vars to set on Vercel**: `DATABASE_URL`, `ALLOWED_ORIGIN=https://your-frontend.vercel.app`
+- Recommended: use **Neon** or **Supabase** for PostgreSQL (they have built-in connection poolers for serverless)
+
 ### Arc Network Details
 - **Network**: Arc Testnet
 - **Chain ID**: 5042002

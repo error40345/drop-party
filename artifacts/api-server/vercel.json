@@ -1,0 +1,5 @@
+{
+  "buildCommand": "pnpm --filter @workspace/db build && pnpm --filter @workspace/api-zod build",
+  "installCommand": "pnpm install",
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+}
