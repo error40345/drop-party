@@ -14,6 +14,7 @@ export const dropsTable = pgTable("drops", {
   isActive: boolean("is_active").notNull().default(true),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   txHash: text("tx_hash"),
+  tokenHash: text("token_hash"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

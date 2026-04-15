@@ -148,33 +148,52 @@ export function Create() {
       // component of the share URL. Without it the drop cannot be accessed via UI.
       const token = generateDropToken();
 
-      // Persist in localStorage so the creator can always recover their link
-      saveMyDrop({
-        dropId: dropIdStr,
-        token,
-        title,
-        createdAt: Date.now(),
-        txHash: createDropTxHash ?? undefined,
-      });
+      // Async: compute SHA-256(token) and record everything
+      void (async () => {
+        // Compute SHA-256 of the token using the Web Crypto API.
+        // The hash is stored server-side; the raw token never leaves the client.
+        let tokenHash: string | null = null;
+        try {
+          const encoder = new TextEncoder();
+          const data = encoder.encode(token);
+          const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+          tokenHash = Array.from(new Uint8Array(hashBuffer))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+        } catch {
+          // If hashing fails (should never happen in modern browsers), continue
+          // without a hash — the drop will be treated as legacy (open access).
+        }
 
-      // Best-effort: record to API server (non-blocking, ignore failures)
-      createDropApi.mutate({
-        data: {
+        // Persist in localStorage so the creator can always recover their link
+        saveMyDrop({
+          dropId: dropIdStr,
+          token,
           title,
-          totalAmount: totalAmount,
-          maxClaims: maxClaimsInt,
-          amountPerClaim: amountPerClaimDisplay,
-          contractAddress: `${DROP_PARTY_ADDRESS}:${dropIdStr}`,
-          creatorAddress: effectiveAddress ?? "",
-          txHash: createDropTxHash ?? "",
-        },
-      });
+          createdAt: Date.now(),
+          txHash: createDropTxHash ?? undefined,
+        });
 
-      toast({
-        title: "Drop deployed!",
-        description: `Drop #${dropIdStr} is live. Share your private link!`,
-      });
-      setLocation(`/drop/${dropIdStr}/${token}`);
+        // Best-effort: record to API server (non-blocking, ignore failures)
+        createDropApi.mutate({
+          data: {
+            title,
+            totalAmount: totalAmount,
+            maxClaims: maxClaimsInt,
+            amountPerClaim: amountPerClaimDisplay,
+            contractAddress: `${DROP_PARTY_ADDRESS}:${dropIdStr}`,
+            creatorAddress: effectiveAddress ?? "",
+            txHash: createDropTxHash ?? "",
+            tokenHash,
+          },
+        });
+
+        toast({
+          title: "Drop deployed!",
+          description: `Drop #${dropIdStr} is live. Share your private link!`,
+        });
+        setLocation(`/drop/${dropIdStr}/${token}`);
+      })();
     }
   }, [isCreateDropConfirmed]);
 

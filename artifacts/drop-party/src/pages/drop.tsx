@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Layout } from "@/components/layout";
 import { useWallet } from "@/lib/wallet";
 import { shortenAddress } from "@/lib/utils";
@@ -24,6 +24,8 @@ import {
   arcTestnet,
 } from "@/lib/contracts";
 
+const API_BASE = import.meta.env.VITE_API_URL ?? "";
+
 export function DropPage() {
   const { dropId: dropIdStr, token } = useParams<{ dropId: string; token: string }>();
   const { address: walletAddress, connect } = useWallet();
@@ -35,12 +37,35 @@ export function DropPage() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
-  const dropId = dropIdStr !== undefined ? BigInt(dropIdStr) : undefined;
+  // Token verification: null = checking, true = ok, false = rejected
+  const [tokenVerified, setTokenVerified] = useState<null | boolean>(null);
+  const verifyCalledRef = useRef(false);
 
-  // Gate: token must be a valid 32-char hex string.
+  const dropId = dropIdStr !== undefined ? BigInt(dropIdStr) : undefined;
   const tokenOk = isValidToken(token);
 
-  // ── Read drop info ─────────────────────────────────────────────────────────
+  // ── Server-side token verification ─────────────────────────────────────────
+  // Verifies that SHA-256(token) matches what was stored when the drop was created.
+  // This prevents someone from bypassing the UI gate with any random 32-char hex string.
+  useEffect(() => {
+    if (!tokenOk || !dropIdStr || verifyCalledRef.current) return;
+    verifyCalledRef.current = true;
+
+    const contractKey = `${DROP_PARTY_ADDRESS}:${dropIdStr}`;
+    const encodedKey = encodeURIComponent(contractKey);
+
+    fetch(`${API_BASE}/api/drops/${encodedKey}/verify-token?token=${token}`)
+      .then((res) => {
+        setTokenVerified(res.ok);
+      })
+      .catch(() => {
+        // Network failure → allow access (fail open so a missing API doesn't
+        // break the entire app; the contract is the real security boundary).
+        setTokenVerified(true);
+      });
+  }, [tokenOk, dropIdStr, token]);
+
+  // ── Read drop info ──────────────────────────────────────────────────────────
   const {
     data: dropData,
     isLoading: isLoadingDrop,
@@ -51,12 +76,12 @@ export function DropPage() {
     functionName: "getDrop",
     args: dropId !== undefined ? [dropId] : undefined,
     query: {
-      enabled: tokenOk && dropId !== undefined,
+      enabled: tokenVerified === true && dropId !== undefined,
       refetchInterval: 5000,
     },
   });
 
-  // ── Check if user has claimed ──────────────────────────────────────────────
+  // ── Check if user has claimed ───────────────────────────────────────────────
   const { data: hasClaimed, refetch: refetchHasClaimed } = useReadContract({
     address: DROP_PARTY_ADDRESS,
     abi: DROP_PARTY_ABI,
@@ -65,12 +90,12 @@ export function DropPage() {
       ? [dropId, effectiveAddress as `0x${string}`]
       : undefined,
     query: {
-      enabled: tokenOk && dropId !== undefined && !!effectiveAddress,
+      enabled: tokenVerified === true && dropId !== undefined && !!effectiveAddress,
       refetchInterval: 5000,
     },
   });
 
-  // ── Claim ──────────────────────────────────────────────────────────────────
+  // ── Claim ───────────────────────────────────────────────────────────────────
   const {
     writeContract: writeClaim,
     data: claimTxHash,
@@ -85,6 +110,29 @@ export function DropPage() {
     if (isClaimConfirmed) {
       refetchDrop();
       refetchHasClaimed();
+
+      // Record claim in the API (best-effort, non-blocking).
+      // Sends X-Drop-Token so the server can verify this came from someone
+      // who legitimately had the share link.
+      if (effectiveAddress && claimTxHash && dropData) {
+        const contractKey = `${DROP_PARTY_ADDRESS}:${dropIdStr}`;
+        const encodedKey = encodeURIComponent(contractKey);
+        const amount = formatUsdc(dropData[2]);
+
+        fetch(`${API_BASE}/api/drops/${encodedKey}/claims`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Drop-Token": token ?? "",
+          },
+          body: JSON.stringify({
+            claimerAddress: effectiveAddress,
+            amount,
+            txHash: claimTxHash,
+          }),
+        }).catch(() => {});
+      }
+
       setLocation(`/drop/${dropIdStr}/${token}/claimed`);
     }
   }, [isClaimConfirmed]);
@@ -99,7 +147,7 @@ export function DropPage() {
     }
   }, [claimWriteError]);
 
-  // ── Cancel Drop ────────────────────────────────────────────────────────────
+  // ── Cancel Drop ─────────────────────────────────────────────────────────────
   const {
     writeContract: writeCancel,
     data: cancelTxHash,
@@ -118,7 +166,6 @@ export function DropPage() {
         title: "Drop cancelled",
         description: "Your remaining USDC has been returned to your wallet.",
       });
-      // Stay on the page so they see it's now closed
     }
   }, [isCancelConfirmed]);
 
@@ -162,7 +209,7 @@ export function DropPage() {
     setTimeout(() => setLinkCopied(false), 2000);
   };
 
-  // ── Invalid token gate ─────────────────────────────────────────────────────
+  // ── Gate: invalid token format ──────────────────────────────────────────────
   if (!tokenOk) {
     return (
       <Layout>
@@ -171,6 +218,37 @@ export function DropPage() {
           <h1 className="text-3xl font-black font-mono uppercase tracking-tight">Link Required</h1>
           <p className="font-mono text-muted-foreground text-sm">
             This drop is private. You need the creator's share link to claim.
+          </p>
+        </div>
+      </Layout>
+    );
+  }
+
+  // ── Gate: verifying token against server ────────────────────────────────────
+  if (tokenVerified === null) {
+    return (
+      <Layout>
+        <div className="flex flex-col items-center justify-center min-h-[50vh]">
+          <Loader2 className="w-12 h-12 text-primary animate-spin" />
+          <p className="mt-4 font-mono text-muted-foreground uppercase tracking-widest">
+            Verifying access...
+          </p>
+        </div>
+      </Layout>
+    );
+  }
+
+  // ── Gate: server rejected the token ────────────────────────────────────────
+  if (tokenVerified === false) {
+    return (
+      <Layout>
+        <div className="min-h-[60vh] flex flex-col items-center justify-center text-center gap-6 max-w-md mx-auto">
+          <Lock className="w-16 h-16 text-destructive/40" />
+          <h1 className="text-3xl font-black font-mono uppercase tracking-tight text-destructive">
+            Invalid Link
+          </h1>
+          <p className="font-mono text-muted-foreground text-sm">
+            This link is not valid for this drop. Only the original share link works.
           </p>
         </div>
       </Layout>
@@ -219,7 +297,6 @@ export function DropPage() {
   const percent           = maxClaims > 0n ? Math.min(100, Math.round(Number((claimedCount * 100n) / maxClaims))) : 0;
   const isExpired         = expiresAt > 0n && BigInt(Math.floor(Date.now() / 1000)) > expiresAt;
 
-  // Is the connected wallet the creator of this drop?
   const isCreator =
     effectiveAddress &&
     creator.toLowerCase() === effectiveAddress.toLowerCase();
@@ -235,7 +312,7 @@ export function DropPage() {
     <Layout>
       <div className="max-w-3xl mx-auto flex flex-col gap-12">
 
-        {/* ── Creator control panel ──────────────────────────────────────── */}
+        {/* ── Creator control panel ───────────────────────────────────────── */}
         {isCreator && active && !isExpired && (
           <div className="p-4 rounded border border-primary/20 bg-primary/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex flex-col gap-0.5">
@@ -255,7 +332,7 @@ export function DropPage() {
           </div>
         )}
 
-        {/* ── Main Drop Area ──────────────────────────────────────────────── */}
+        {/* ── Main Drop Area ───────────────────────────────────────────────── */}
         <div className="flex flex-col items-center text-center gap-6">
           <div className="flex flex-col gap-1 items-center">
             <div className="inline-block px-4 py-1 rounded bg-black border border-primary/30 font-mono text-xs text-muted-foreground">
@@ -363,7 +440,7 @@ export function DropPage() {
           </div>
         </div>
 
-        {/* ── On-Chain Info ────────────────────────────────────────────────── */}
+        {/* ── On-Chain Info ─────────────────────────────────────────────────── */}
         <div className="border-t border-primary/20 pt-8 flex flex-col gap-3">
           <div className="flex items-center gap-2 mb-2">
             <Zap className="text-primary w-5 h-5" />
@@ -396,7 +473,7 @@ export function DropPage() {
         </div>
       </div>
 
-      {/* ── Cancel confirmation dialog ─────────────────────────────────────── */}
+      {/* ── Cancel confirmation dialog ──────────────────────────────────────── */}
       <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
         <DialogContent className="bg-black border-destructive/30 font-mono max-w-md">
           <DialogHeader>

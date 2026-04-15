@@ -17,4 +17,6 @@ export interface CreateDropBody {
   expiresAt?: string | null;
   /** @nullable */
   txHash?: string | null;
+  /** @nullable SHA-256 hex hash of the drop's access token */
+  tokenHash?: string | null;
 }

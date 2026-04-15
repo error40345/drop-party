@@ -58,6 +58,7 @@ export const CreateDropBody = zod.object({
   maxClaims: zod.number(),
   expiresAt: zod.string().nullish(),
   txHash: zod.string().nullish(),
+  tokenHash: zod.string().nullish(),
 });
 
 /**
