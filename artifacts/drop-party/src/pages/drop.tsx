@@ -1,13 +1,21 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Layout } from "@/components/layout";
 import { useWallet } from "@/lib/wallet";
 import { shortenAddress } from "@/lib/utils";
 import { isValidToken } from "@/lib/drops-store";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useLocation, useParams } from "wouter";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Zap, Share2, Lock } from "lucide-react";
+import { Loader2, Zap, Share2, Lock, XCircle, Copy, Check } from "lucide-react";
 import { useReadContract, useWriteContract, useWaitForTransactionReceipt, useAccount } from "wagmi";
 import {
   DROP_PARTY_ADDRESS,
@@ -24,13 +32,15 @@ export function DropPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
   const dropId = dropIdStr !== undefined ? BigInt(dropIdStr) : undefined;
 
   // Gate: token must be a valid 32-char hex string.
-  // Without the exact link the drop is inaccessible through the UI.
   const tokenOk = isValidToken(token);
 
-  // Read drop info from chain (only when token is valid)
+  // ── Read drop info ─────────────────────────────────────────────────────────
   const {
     data: dropData,
     isLoading: isLoadingDrop,
@@ -46,19 +56,21 @@ export function DropPage() {
     },
   });
 
-  // Check if user has claimed
+  // ── Check if user has claimed ──────────────────────────────────────────────
   const { data: hasClaimed, refetch: refetchHasClaimed } = useReadContract({
     address: DROP_PARTY_ADDRESS,
     abi: DROP_PARTY_ABI,
     functionName: "hasClaimed",
-    args: dropId !== undefined && effectiveAddress ? [dropId, effectiveAddress as `0x${string}`] : undefined,
+    args: dropId !== undefined && effectiveAddress
+      ? [dropId, effectiveAddress as `0x${string}`]
+      : undefined,
     query: {
       enabled: tokenOk && dropId !== undefined && !!effectiveAddress,
       refetchInterval: 5000,
     },
   });
 
-  // Write: claim
+  // ── Claim ──────────────────────────────────────────────────────────────────
   const {
     writeContract: writeClaim,
     data: claimTxHash,
@@ -69,7 +81,6 @@ export function DropPage() {
   const { isLoading: isClaimConfirming, isSuccess: isClaimConfirmed } =
     useWaitForTransactionReceipt({ hash: claimTxHash });
 
-  // Handle claim success
   useEffect(() => {
     if (isClaimConfirmed) {
       refetchDrop();
@@ -78,7 +89,6 @@ export function DropPage() {
     }
   }, [isClaimConfirmed]);
 
-  // Handle claim error
   useEffect(() => {
     if (claimWriteError) {
       toast({
@@ -89,11 +99,42 @@ export function DropPage() {
     }
   }, [claimWriteError]);
 
-  const handleClaim = () => {
-    if (!effectiveAddress) {
-      connect();
-      return;
+  // ── Cancel Drop ────────────────────────────────────────────────────────────
+  const {
+    writeContract: writeCancel,
+    data: cancelTxHash,
+    isPending: isCancelPending,
+    error: cancelWriteError,
+  } = useWriteContract();
+
+  const { isLoading: isCancelConfirming, isSuccess: isCancelConfirmed } =
+    useWaitForTransactionReceipt({ hash: cancelTxHash });
+
+  useEffect(() => {
+    if (isCancelConfirmed) {
+      refetchDrop();
+      setShowCancelDialog(false);
+      toast({
+        title: "Drop cancelled",
+        description: "Your remaining USDC has been returned to your wallet.",
+      });
+      // Stay on the page so they see it's now closed
     }
+  }, [isCancelConfirmed]);
+
+  useEffect(() => {
+    if (cancelWriteError) {
+      setShowCancelDialog(false);
+      toast({
+        title: "Cancel failed",
+        description: cancelWriteError.message.slice(0, 150),
+        variant: "destructive",
+      });
+    }
+  }, [cancelWriteError]);
+
+  const handleClaim = () => {
+    if (!effectiveAddress) { connect(); return; }
     if (dropId === undefined) return;
     writeClaim({
       address: DROP_PARTY_ADDRESS,
@@ -104,15 +145,30 @@ export function DropPage() {
     });
   };
 
-  // --- Invalid / missing token ---
+  const handleCancelConfirm = () => {
+    if (dropId === undefined) return;
+    writeCancel({
+      address: DROP_PARTY_ADDRESS,
+      abi: DROP_PARTY_ABI,
+      functionName: "cancelDrop",
+      args: [dropId],
+      chainId: arcTestnet.id,
+    });
+  };
+
+  const handleCopyLink = async () => {
+    await navigator.clipboard.writeText(window.location.href);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  // ── Invalid token gate ─────────────────────────────────────────────────────
   if (!tokenOk) {
     return (
       <Layout>
         <div className="min-h-[60vh] flex flex-col items-center justify-center text-center gap-6 max-w-md mx-auto">
           <Lock className="w-16 h-16 text-primary/40" />
-          <h1 className="text-3xl font-black font-mono uppercase tracking-tight text-foreground">
-            Link Required
-          </h1>
+          <h1 className="text-3xl font-black font-mono uppercase tracking-tight">Link Required</h1>
           <p className="font-mono text-muted-foreground text-sm">
             This drop is private. You need the creator's share link to claim.
           </p>
@@ -156,23 +212,50 @@ export function DropPage() {
     totalAmount,
   ] = dropData;
 
-  const amountDisplay = formatUsdc(amountPerClaimRaw);
-  const totalDisplay = formatUsdc(totalAmount);
-  const isFinished = !active || claimedCount >= maxClaims;
-  const percent = maxClaims > 0n ? Math.min(100, Math.round(Number((claimedCount * 100n) / maxClaims))) : 0;
-  const isExpired = expiresAt > 0n && BigInt(Math.floor(Date.now() / 1000)) > expiresAt;
+  const amountDisplay     = formatUsdc(amountPerClaimRaw);
+  const totalDisplay      = formatUsdc(totalAmount);
+  const refundableAmount  = formatUsdc(remainingSlots * amountPerClaimRaw);
+  const isFinished        = !active || claimedCount >= maxClaims;
+  const percent           = maxClaims > 0n ? Math.min(100, Math.round(Number((claimedCount * 100n) / maxClaims))) : 0;
+  const isExpired         = expiresAt > 0n && BigInt(Math.floor(Date.now() / 1000)) > expiresAt;
 
-  // Share URL preserves the token so recipients can also access the drop
-  const shareUrl = typeof window !== "undefined" ? window.location.href : "";
-  const shareText = `just dropped $${totalDisplay} USDC on DropParty — first come first serve 👇`;
+  // Is the connected wallet the creator of this drop?
+  const isCreator =
+    effectiveAddress &&
+    creator.toLowerCase() === effectiveAddress.toLowerCase();
+
+  const shareUrl      = typeof window !== "undefined" ? window.location.href : "";
+  const shareText     = `just dropped $${totalDisplay} USDC on DropParty — first come first serve 👇`;
   const twitterIntent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
 
-  const isClaiming = isClaimPending || isClaimConfirming;
+  const isClaiming    = isClaimPending || isClaimConfirming;
+  const isCancelling  = isCancelPending || isCancelConfirming;
 
   return (
     <Layout>
       <div className="max-w-3xl mx-auto flex flex-col gap-12">
-        {/* Main Drop Area */}
+
+        {/* ── Creator control panel ──────────────────────────────────────── */}
+        {isCreator && active && !isExpired && (
+          <div className="p-4 rounded border border-primary/20 bg-primary/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex flex-col gap-0.5">
+              <span className="font-mono text-xs text-primary uppercase font-bold">Your Drop</span>
+              <span className="font-mono text-xs text-muted-foreground">
+                You can cancel anytime and recover <span className="text-foreground font-bold">${refundableAmount} USDC</span> remaining
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => setShowCancelDialog(true)}
+              className="shrink-0 font-mono text-sm border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive"
+            >
+              <XCircle className="w-4 h-4 mr-2" />
+              Cancel Drop
+            </Button>
+          </div>
+        )}
+
+        {/* ── Main Drop Area ──────────────────────────────────────────────── */}
         <div className="flex flex-col items-center text-center gap-6">
           <div className="flex flex-col gap-1 items-center">
             <div className="inline-block px-4 py-1 rounded bg-black border border-primary/30 font-mono text-xs text-muted-foreground">
@@ -184,7 +267,12 @@ export function DropPage() {
                 <span className="font-mono text-xs text-primary">LIVE</span>
               </div>
             )}
-            {isExpired && (
+            {!active && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-muted/30 border border-muted/20">
+                <span className="font-mono text-xs text-muted-foreground">CLOSED</span>
+              </div>
+            )}
+            {isExpired && active && (
               <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/20">
                 <span className="font-mono text-xs text-yellow-400">EXPIRED</span>
               </div>
@@ -214,12 +302,13 @@ export function DropPage() {
             </div>
           </div>
 
-          <div className="mt-8 w-full max-w-md flex flex-col gap-4">
+          <div className="mt-8 w-full max-w-md flex flex-col gap-3">
+            {/* Claim button */}
             <Button
               onClick={handleClaim}
-              disabled={isFinished || !!hasClaimed || isClaiming || isExpired}
+              disabled={isFinished || !!hasClaimed || isClaiming || isExpired || !active}
               className={`w-full h-20 text-3xl font-black font-mono uppercase tracking-widest transition-all
-                ${isFinished || isExpired
+                ${isFinished || isExpired || !active
                   ? "bg-secondary text-muted-foreground border-secondary opacity-50"
                   : hasClaimed
                     ? "bg-primary/20 text-primary border-primary"
@@ -232,6 +321,8 @@ export function DropPage() {
                   <Loader2 className="w-8 h-8 animate-spin" />
                   {isClaimConfirming ? "Confirming..." : "Confirm in wallet..."}
                 </div>
+              ) : !active ? (
+                "Drop Closed"
               ) : isFinished ? (
                 "Drop Finished ⚡"
               ) : isExpired ? (
@@ -245,24 +336,34 @@ export function DropPage() {
               )}
             </Button>
 
-            <a
-              href={twitterIntent}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full"
-            >
-              <Button
-                variant="outline"
-                className="w-full h-12 font-mono text-sm border-primary/30 hover:bg-primary/10"
+            {/* Share row */}
+            <div className="flex gap-2 w-full">
+              <button
+                onClick={handleCopyLink}
+                className="flex-1 flex items-center justify-center gap-2 h-12 font-mono text-sm border border-primary/30 rounded hover:bg-primary/10 transition-colors"
               >
-                <Share2 className="w-4 h-4 mr-2" />
-                SHARE TO X
-              </Button>
-            </a>
+                {linkCopied ? <Check className="w-4 h-4 text-primary" /> : <Copy className="w-4 h-4" />}
+                {linkCopied ? "LINK COPIED" : "COPY LINK"}
+              </button>
+              <a
+                href={twitterIntent}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1"
+              >
+                <Button
+                  variant="outline"
+                  className="w-full h-12 font-mono text-sm border-primary/30 hover:bg-primary/10"
+                >
+                  <Share2 className="w-4 h-4 mr-2" />
+                  SHARE TO X
+                </Button>
+              </a>
+            </div>
           </div>
         </div>
 
-        {/* Contract info */}
+        {/* ── On-Chain Info ────────────────────────────────────────────────── */}
         <div className="border-t border-primary/20 pt-8 flex flex-col gap-3">
           <div className="flex items-center gap-2 mb-2">
             <Zap className="text-primary w-5 h-5" />
@@ -273,7 +374,7 @@ export function DropPage() {
               { label: "Contract", value: `${DROP_PARTY_ADDRESS.slice(0, 10)}...${DROP_PARTY_ADDRESS.slice(-6)}` },
               { label: "Drop ID", value: `#${dropIdStr}` },
               { label: "Creator", value: shortenAddress(creator) },
-              { label: "Status", value: isFinished ? "Closed" : isExpired ? "Expired" : "Active" },
+              { label: "Status", value: !active ? "Closed" : isFinished ? "Finished" : isExpired ? "Expired" : "Active" },
               { label: "Per Claim", value: `$${amountDisplay} USDC` },
               { label: "Total Pool", value: `$${totalDisplay} USDC` },
             ].map(({ label, value }) => (
@@ -294,6 +395,58 @@ export function DropPage() {
           </a>
         </div>
       </div>
+
+      {/* ── Cancel confirmation dialog ─────────────────────────────────────── */}
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent className="bg-black border-destructive/30 font-mono max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive uppercase tracking-wide text-xl font-black">
+              Cancel Drop?
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground pt-2 space-y-2">
+              <p>
+                This will immediately close the drop and return your remaining USDC to your wallet.
+              </p>
+              <div className="mt-4 p-4 rounded border border-primary/20 bg-primary/5 text-center">
+                <div className="text-xs text-muted-foreground uppercase mb-1">You will receive back</div>
+                <div className="text-4xl font-black text-primary text-glow">${refundableAmount}</div>
+                <div className="text-xs text-muted-foreground mt-1">USDC · {remainingSlots.toString()} unclaimed slots</div>
+              </div>
+              <p className="text-xs text-muted-foreground pt-2">
+                {Number(claimedCount)} people have already claimed ${formatUsdc(claimedCount * amountPerClaimRaw)} and keep their USDC.
+                This action cannot be undone.
+              </p>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowCancelDialog(false)}
+              disabled={isCancelling}
+              className="flex-1 border-primary/30 font-mono"
+            >
+              Keep Running
+            </Button>
+            <Button
+              onClick={handleCancelConfirm}
+              disabled={isCancelling}
+              className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90 font-mono font-bold"
+            >
+              {isCancelling ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {isCancelConfirming ? "Confirming..." : "Confirm in wallet..."}
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4 mr-2" />
+                  Cancel & Refund
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
