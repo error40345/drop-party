@@ -4,7 +4,7 @@ import { useGetDropsSummary, useListDrops, useGetRecentActivity } from "@workspa
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { shortenAddress } from "@/lib/wallet";
+import { shortenAddress } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { Zap, Activity, Clock } from "lucide-react";
 

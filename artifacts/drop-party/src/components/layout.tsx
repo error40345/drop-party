@@ -1,5 +1,6 @@
 import { Link } from "wouter";
-import { useWallet, shortenAddress } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet";
+import { shortenAddress } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Coins } from "lucide-react";
 

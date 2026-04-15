@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Layout } from "@/components/layout";
-import { useWallet, shortenAddress } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet";
+import { shortenAddress } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useLocation, useParams } from "wouter";

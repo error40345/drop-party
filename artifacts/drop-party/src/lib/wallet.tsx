@@ -1,9 +1,8 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import {
   useAccount,
   useConnect,
   useDisconnect,
-  useSwitchChain,
   useChainId,
 } from 'wagmi';
 import { arcTestnet } from './contracts';
@@ -25,12 +24,23 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
+const ARC_CHAIN_HEX = `0x${arcTestnet.id.toString(16)}`;
+
+const ARC_CHAIN_PARAMS = {
+  chainId: ARC_CHAIN_HEX,
+  chainName: 'Arc Testnet',
+  nativeCurrency: arcTestnet.nativeCurrency,
+  rpcUrls: ['https://rpc.testnet.arc.network'],
+  blockExplorerUrls: ['https://testnet.arcscan.app'],
+};
+
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const { address, isConnected } = useAccount();
   const { connect: wagmiConnect, connectors } = useConnect();
   const { disconnect: wagmiDisconnect } = useDisconnect();
   const chainId = useChainId();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const [isSwitching, setIsSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
 
   const isWrongNetwork = isConnected && chainId !== arcTestnet.id;
 
@@ -43,6 +53,38 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const disconnect = () => {
     wagmiDisconnect();
+  };
+
+  const handleSwitchChain = async () => {
+    const ethereum = (window as any).ethereum;
+    if (!ethereum) return;
+
+    setIsSwitching(true);
+    setSwitchError(null);
+
+    try {
+      // First try to switch (works if chain is already in wallet)
+      await ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: ARC_CHAIN_HEX }],
+      });
+    } catch (switchErr: any) {
+      // 4902 = chain not added to wallet yet → add it
+      if (switchErr?.code === 4902 || switchErr?.code === -32603) {
+        try {
+          await ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [ARC_CHAIN_PARAMS],
+          });
+        } catch (addErr: any) {
+          setSwitchError(addErr?.message?.slice(0, 100) ?? 'Failed to add network');
+        }
+      } else {
+        setSwitchError(switchErr?.message?.slice(0, 100) ?? 'Failed to switch network');
+      }
+    } finally {
+      setIsSwitching(false);
+    }
   };
 
   return (
@@ -64,14 +106,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
               WRONG NETWORK
             </DialogTitle>
             <DialogDescription className="font-mono text-sm text-center">
-              DropParty is deployed on{' '}
+              DropParty runs on{' '}
               <span className="text-primary font-bold">Arc Testnet</span>.<br />
-              Your wallet is on a different network.
+              Switch networks to continue.
             </DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-col gap-3 py-4">
-            <div className="p-3 rounded bg-black border border-primary/20 flex flex-col gap-1 font-mono text-xs text-muted-foreground">
+            {/* Network info */}
+            <div className="p-3 rounded bg-black border border-primary/20 flex flex-col gap-1.5 font-mono text-xs text-muted-foreground">
               <div className="flex justify-between">
                 <span>Network</span>
                 <span className="text-primary font-bold">Arc Testnet</span>
@@ -82,16 +125,25 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
               </div>
               <div className="flex justify-between">
                 <span>RPC</span>
-                <span className="text-foreground/60 truncate ml-2">rpc.testnet.arc.network</span>
+                <span className="text-foreground/60">rpc.testnet.arc.network</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Explorer</span>
+                <span className="text-foreground/60">testnet.arcscan.app</span>
               </div>
             </div>
 
+            {switchError && (
+              <p className="text-xs font-mono text-destructive text-center px-2">{switchError}</p>
+            )}
+
+            {/* Add / Switch button — calls wallet_addEthereumChain if not present */}
             <Button
-              onClick={() => switchChain({ chainId: arcTestnet.id })}
+              onClick={handleSwitchChain}
               disabled={isSwitching}
               className="w-full electric-glow font-bold tracking-widest bg-primary text-black hover:bg-primary/90 h-12 font-mono"
             >
-              {isSwitching ? 'SWITCHING...' : 'SWITCH TO ARC TESTNET'}
+              {isSwitching ? 'CHECK YOUR WALLET...' : 'ADD / SWITCH TO ARC TESTNET'}
             </Button>
 
             <Button
@@ -114,7 +166,3 @@ export function useWallet() {
   return context;
 }
 
-export function shortenAddress(address: string) {
-  if (!address) return '';
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
