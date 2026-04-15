@@ -3,7 +3,6 @@ import {
   useAccount,
   useConnect,
   useDisconnect,
-  useChainId,
 } from 'wagmi';
 import { arcTestnet } from './contracts';
 import { Button } from '@/components/ui/button';
@@ -35,14 +34,15 @@ const ARC_CHAIN_PARAMS = {
 };
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
-  const { address, isConnected } = useAccount();
+  // chainId from useAccount() reflects the wallet's actual connected chain,
+  // unlike useChainId() which returns the wagmi config's default chain.
+  const { address, isConnected, chainId: walletChainId } = useAccount();
   const { connect: wagmiConnect, connectors } = useConnect();
   const { disconnect: wagmiDisconnect } = useDisconnect();
-  const chainId = useChainId();
   const [isSwitching, setIsSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
 
-  const isWrongNetwork = isConnected && chainId !== arcTestnet.id;
+  const isWrongNetwork = isConnected && walletChainId !== arcTestnet.id;
 
   const connect = () => {
     const injectedConnector = connectors.find(c => c.id === 'injected') ?? connectors[0];
