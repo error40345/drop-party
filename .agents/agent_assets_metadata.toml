@@ -1,8 +1,0 @@
-uploads = []
-generated = []
-
-[[outputs]]
-id = "It5M7JvrgWSxRseT8fn5C"
-uri = "file://README.md"
-type = "text"
-title = "DropParty README"
