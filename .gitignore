@@ -41,9 +41,22 @@ testem.log
 .DS_Store
 Thumbs.db
 
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
+# Environment
+.env
+.env.local
+.env.*.local
 
-# Replit
+# Dev environment / tooling
 .cache/
 .local/
+.agents/
+.replit
+.replitignore
+replit.nix
+replit.md
+**/.replit-artifact/
+attached_assets/
+api/
+
+.cursor/rules/nx-rules.mdc
+.github/instructions/nx.instructions.md

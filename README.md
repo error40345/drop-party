@@ -1,102 +1,163 @@
 # DropParty
 
-Viral onchain USDC giveaway platform built on Arc Testnet. Create a funded drop, share the link, and let anyone with it claim their share instantly.
+> Fund a pool. Share a link. Watch the chaos unfold.
 
-## How it works
+DropParty is a viral, on-chain USDC giveaway platform on the **Arc Network**. Anyone can fund a drop, share the link, and let the first N people who claim split the pool — with the smart contract holding the funds, escrowing the rules, and settling claims atomically.
 
-1. **Create** — Set a title, USDC amount per claim, max number of claimants, and an optional expiry date. The total USDC (`amountPerClaim × maxClaims`) is pulled from your wallet into the smart contract.
-2. **Share** — A unique link is generated with a 128-bit random token in the URL. Only people with the link can see the claim button.
-3. **Claim** — Anyone with the link connects their wallet and claims their USDC in one click. Funds transfer directly on-chain.
-4. **Finalize** — Once all slots are filled the drop closes automatically. Creators can cancel at any time to recover remaining funds. Expired drops can be refunded by anyone.
+No backend custody. No off-chain promises. Just a contract, a wallet, and a link.
 
-## Tech stack
+---
 
-| Layer | Tools |
-|---|---|
-| Frontend | React, Vite, Tailwind CSS, Shadcn/Radix UI, Framer Motion |
-| Web3 | Wagmi, Viem, TanStack Query |
-| Backend | Express 5, TypeScript, Node.js 24 |
-| Database | PostgreSQL, Drizzle ORM |
-| Contracts | Solidity 0.8.20, Foundry |
-| Monorepo | pnpm workspaces |
+## The idea
 
-## Smart contract
+Most onchain "airdrops" are either too complicated (Merkle proofs, claim windows, KYC) or too dumb (faucet that gets botted to zero in 30 seconds). DropParty sits in the middle:
+
+- A creator deposits `amountPerClaim × maxClaims` USDC into the contract in one transaction.
+- A 128-bit random token is generated client-side and appended to the share URL. Without that token in the URL, the UI won't show the claim button — meaning bots scraping the contract can't reasonably guess valid links.
+- First N wallets to hit the link and click claim get the USDC. One claim per wallet, enforced on-chain.
+- If the drop expires unclaimed, anyone can trigger a refund back to the creator.
+- Creator can cancel at any time and pull back the unclaimed remainder.
+
+That's it. Nothing fancier than what the contract enforces.
+
+---
+
+## Stack
 
 | | |
 |---|---|
-| Network | Arc Testnet (Chain ID: `5042002`) |
+| **Frontend** | React 19, Vite 7, Tailwind v4, Shadcn (Radix), Framer Motion, Wouter |
+| **Web3** | Wagmi v3, Viem, TanStack Query |
+| **Backend** | Express 5, Node.js 24, TypeScript |
+| **Database** | PostgreSQL + Drizzle ORM |
+| **Contracts** | Solidity 0.8.20, Foundry |
+| **Validation** | Zod end-to-end, OpenAPI spec → Orval-generated typed client |
+| **Monorepo** | pnpm workspaces |
+
+The backend is intentionally thin — it indexes drops and claims for fast list/feed queries. **All authoritative state lives on the contract.** If the API died tomorrow, every drop would still be claimable directly via the contract.
+
+---
+
+## Live contract
+
+| | |
+|---|---|
+| Network | Arc Testnet |
+| Chain ID | `5042002` |
 | RPC | `https://rpc.testnet.arc.network` |
-| Explorer | [arcscan.app](https://testnet.arcscan.app) |
-| DropParty | `0x8017c01FFbDB22E6170dDD420355f497f3229A0D` |
-| USDC | `0x3600000000000000000000000000000000000000` |
+| Explorer | https://testnet.arcscan.app |
+| **DropParty** | [`0x8017c01FFbDB22E6170dDD420355f497f3229A0D`](https://testnet.arcscan.app/address/0x8017c01FFbDB22E6170dDD420355f497f3229A0D) |
+| **USDC** | `0x3600000000000000000000000000000000000000` |
 
-## Monorepo structure
+---
+
+## Repository layout
 
 ```
-/
+.
 ├── artifacts/
-│   ├── drop-party/       # React + Vite frontend
-│   └── api-server/       # Express 5 REST API
-├── contracts/            # Solidity contracts (Foundry)
+│   ├── drop-party/         # React + Vite frontend (the dapp)
+│   └── api-server/         # Express 5 REST API (indexer)
+├── contracts/              # Solidity sources + Foundry tests
 ├── lib/
-│   └── db/               # Drizzle schema + migrations
-└── pnpm-workspace.yaml
+│   ├── db/                 # Drizzle schema, migrations, client
+│   ├── api-spec/           # OpenAPI spec (source of truth)
+│   └── api-client-react/   # Generated TanStack Query hooks
+├── pnpm-workspace.yaml
+└── vercel.json
 ```
+
+---
 
 ## Local development
 
-**Prerequisites:** Node.js 24, pnpm 10, PostgreSQL
+**Prereqs:** Node.js 24, pnpm 10, a local or hosted PostgreSQL.
 
 ```bash
-# Install dependencies
+# 1. Install
 pnpm install
 
-# Set environment variables
-# Create .env in artifacts/api-server with:
-# DATABASE_URL=postgresql://...
-# ALLOWED_ORIGIN=http://localhost:22153
+# 2. Configure the API
+# Create artifacts/api-server/.env:
+#   DATABASE_URL=postgresql://user:pass@host:5432/dropparty
+#   ALLOWED_ORIGIN=http://localhost:22153
 
-# Push database schema
+# 3. Push the schema
 pnpm --filter @workspace/db run push
 
-# Start API server (port 8080)
-pnpm --filter @workspace/api-server run dev
-
-# Start frontend (port 22153)
-pnpm --filter @workspace/drop-party run dev
+# 4. Run both services (in two terminals)
+pnpm --filter @workspace/api-server run dev    # :8080
+pnpm --filter @workspace/drop-party run dev    # :22153
 ```
+
+Then point your browser at `http://localhost:22153` and connect a wallet on Arc Testnet.
+
+### Working on the contract
+
+```bash
+cd contracts
+forge build
+forge test -vvv
+```
+
+The deployed address is hardcoded in `artifacts/drop-party/src/lib/contracts.ts`. If you redeploy, update it there.
+
+---
 
 ## Deployment
 
-The project deploys as two separate Vercel projects:
+DropParty deploys as **two separate Vercel projects** sharing the same repo. This keeps the static frontend cacheable on the edge and the API on its own scalable runtime.
 
-### Frontend
+### Frontend project
 
-- **Root Directory:** leave blank (repo root)
-- **Build Command:** leave blank (uses `vercel.json`)
-- **Environment Variables:**
-  - `VITE_API_URL` — URL of the deployed API
+| Setting | Value |
+|---|---|
+| Root Directory | *(blank — repo root)* |
+| Build Command | *(blank — uses `vercel.json`)* |
+| Output Directory | `artifacts/drop-party/dist/public` |
+| Env vars | `VITE_API_URL` → URL of the API project |
 
-### API Server
+### API project
 
-- **Root Directory:** `artifacts/api-server`
-- **Build Command:** leave blank (uses `vercel.json`)
-- **Environment Variables:**
-  - `DATABASE_URL` — Neon (or any external) PostgreSQL connection string
-  - `ALLOWED_ORIGIN` — Frontend URL for CORS
+| Setting | Value |
+|---|---|
+| Root Directory | `artifacts/api-server` |
+| Build Command | *(blank — uses `vercel.json`)* |
+| Env vars | `DATABASE_URL` (e.g. Neon), `ALLOWED_ORIGIN` (frontend URL) |
 
-After deploying the API, run the schema migration:
+After the API is live, push the schema to the production database:
 
 ```bash
-DATABASE_URL="your-neon-string" pnpm --filter @workspace/db run push
+DATABASE_URL="postgresql://..." pnpm --filter @workspace/db run push
 ```
 
-## API routes
+---
+
+## API reference
+
+All routes are JSON. The OpenAPI spec lives in `lib/api-spec/openapi.yaml` and the typed React client is regenerated from it on every build.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/drops` | List all active drops |
-| `GET` | `/api/drops/:id` | Get a single drop |
-| `POST` | `/api/drops` | Index a new drop |
-| `GET` | `/api/drops/:id/claims` | List claims for a drop |
-| `POST` | `/api/drops/:id/claims` | Record a claim |
+| `GET`  | `/api/drops`              | Paginated list of indexed drops |
+| `GET`  | `/api/drops/:id`          | Single drop with current claim count |
+| `POST` | `/api/drops`              | Index a newly created drop (called after on-chain tx confirms) |
+| `GET`  | `/api/drops/:id/claims`   | Claim feed for a drop |
+| `POST` | `/api/drops/:id/claims`   | Record a claim (called after on-chain tx confirms) |
+| `GET`  | `/api/health`             | Health check |
+
+The API is an indexer, not a source of truth. Every write is verified against the on-chain transaction before being persisted.
+
+---
+
+## Security notes
+
+- **Share-link gating is UX, not security.** The 128-bit URL token prevents the casual frontend from showing "claim" to randos browsing the contract — but a determined bot calling the contract directly can still race claims. Treat drops as first-come-first-serve, period.
+- `pnpm-workspace.yaml` enforces a 24-hour `minimumReleaseAge` on every npm dependency to mitigate supply-chain attacks. Don't disable it.
+- The contract has been audited internally; an external audit is on the roadmap before mainnet.
+
+---
+
+## License
+
+MIT. Go wild.

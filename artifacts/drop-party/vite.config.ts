@@ -2,9 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-export default defineConfig(async ({ command }) => {
+export default defineConfig(({ command }) => {
   const isDev = command === "serve";
 
   let port = 3000;
@@ -23,20 +22,7 @@ export default defineConfig(async ({ command }) => {
 
   return {
     base: basePath,
-    plugins: [
-      react(),
-      tailwindcss(),
-      ...(isDev ? [runtimeErrorOverlay()] : []),
-      ...(isDev && process.env.REPL_ID !== undefined
-        ? [
-            await import("@replit/vite-plugin-cartographer").then((m) =>
-              m.cartographer({
-                root: path.resolve(import.meta.dirname, ".."),
-              }),
-            ),
-          ]
-        : []),
-    ],
+    plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
         "@": path.resolve(import.meta.dirname, "src"),
