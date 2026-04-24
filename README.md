@@ -46,7 +46,7 @@ The backend is intentionally thin — it indexes drops and claims for fast list/
 | Chain ID | `5042002` |
 | RPC | `https://rpc.testnet.arc.network` |
 | Explorer | https://testnet.arcscan.app |
-| **DropParty** | [`0x8017c01FFbDB22E6170dDD420355f497f3229A0D`](https://testnet.arcscan.app/address/0x8017c01FFbDB22E6170dDD420355f497f3229A0D) |
+| **DropParty** | [`0x2317134930cF09762BcCa67e2c301E39f7CF792c`](https://testnet.arcscan.app/address/0x2317134930cF09762BcCa67e2c301E39f7CF792c) |
 | **USDC** | `0x3600000000000000000000000000000000000000` |
 
 ---

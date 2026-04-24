@@ -22,7 +22,7 @@ export const arcTestnet = defineChain({
 
 export const USDC_ADDRESS = "0x3600000000000000000000000000000000000000" as const;
 
-export const DROP_PARTY_ADDRESS = "0x8017c01FFbDB22E6170dDD420355f497f3229A0D" as const;
+export const DROP_PARTY_ADDRESS = "0x2317134930cF09762BcCa67e2c301E39f7CF792c" as const;
 
 export const DROP_PARTY_ABI = [
   {
